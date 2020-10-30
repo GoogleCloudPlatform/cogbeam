@@ -34,28 +34,33 @@ def write_script():
 		bucket_name, prefix=cog_folder, delimiter=None
 	)
 	script_name = 'gee-script.js'
+	
+	if not cog_folder:
+			gcs_script_filename = 'gee-script.js'
+	else:
+		gcs_script_filename = cog_folder + "/" + script_name
 	cog_uris = []
 	for blob in blobs:
 		if fnmatch.fnmatch(blob.name, "*.tif"):
 			blob_uri = 'gs://{}/{}'.format(bucket_name,blob.name)
 			cog_uris.append(blob_uri)
 
-	declare_var_tmpl = "var {image} = ee.Image.loadGeoTIFF('{uri}')\n"
-	declare_list_tmpl = "var list = [{images}]\n"
-	declare_img_coll = "var imageCollection =ee.ImageCollection.fromImages(list)\n"
-	declare_methods = """Map.addLayer(imageCollection);\nMap.centerObject(imageCollection,13)"""
+	var_tmpl = "var {image} = ee.Image.loadGeoTIFF('{uri}')\n"
+	list_tmpl = "var list = [{images}]\n"
+	img_coll = "var imageCollection = ee.ImageCollection.fromImages(list)\n"
+	methods = """Map.addLayer(imageCollection);\nMap.centerObject(imageCollection,13)"""
 	image_vars = ['image' + str(n) for n in range(len(cog_uris))]
 	with open(script_name, 'w') as dest:
 		for uri, image_var in zip(cog_uris, image_vars):
-			dest.write(declare_var_tmpl.format(image=image_var, uri=uri))
-		dest.write(declare_list_tmpl.format(images=', '.join(image_vars)))
-		dest.write(declare_img_coll)
-		dest.write(declare_methods)
+			dest.write(var_tmpl.format(image=image_var, uri=uri))
+		dest.write(list_tmpl.format(images=', '.join(image_vars)))
+		dest.write(img_coll)
+		dest.write(methods)
 	cog_bucket = storage_client.bucket(bucket_name)
-	new_blob = cog_bucket.blob(cog_folder + "/" + script_name)
+	new_blob = cog_bucket.blob(gcs_script_filename)
 	new_blob.upload_from_filename(script_name)
 
-	script_uri = ('gs://{}/{}'.format(bucket_name, cog_folder + "/" + script_name))
+	script_uri = ('gs://{}/{}'.format(bucket_name, gcs_script_filename))
 	logging.info('GEE Script uploaded to: {}'.format(script_uri))
 
 
@@ -136,7 +141,11 @@ class create_cog(beam.DoFn):
 
 		# Upload to COG Export bucket
 		cog_bucket_name = options['cog_bucket']
-		gcs_cog_filename = options['cog_folder'] + "/" + cog_tif_filename
+		cog_folder = options['cog_folder']
+		if not cog_folder:
+			gcs_cog_filename = cog_tif_filename
+		else:
+			gcs_cog_filename = options['cog_folder'] + "/" + cog_tif_filename
 		cog_bucket = storage_client.bucket(cog_bucket_name)
 		new_blob = cog_bucket.blob(gcs_cog_filename)
 		new_blob.upload_from_filename(cog_tif_filename)
@@ -167,8 +176,13 @@ def run_job(options):
 	p.run().wait_until_finish()
 
 	# Clean up Dataflow tmp / staging directories
+	if not options['cog_folder']:
+		prefix = "tmp"
+	else:
+		prefix = options['cog_folder'] + "/tmp"
+
 	storage_client = storage.Client()
-	temp_blobs = storage_client.list_blobs(options['cog_bucket'], prefix=options['cog_folder'] + "/tmp", delimiter=None)
+	temp_blobs = storage_client.list_blobs(options['cog_bucket'], prefix=prefix, delimiter=None)
 	for blob in temp_blobs:
 		logging.info("Deleting {}".format(blob.name))
 		blob.delete()
@@ -180,15 +194,15 @@ if __name__ == '__main__':
 	parser = argparse.ArgumentParser(
 	  description='Create Cloud Optimized GeoTIFFs from GeoTIFFs')
 	parser.add_argument(
-	  '--project', required=True, help='Specify GCP project to bill to run on cloud')
+	  '--project', required=True, help='Specify GCP project where pipeline will run and usage will be billed')
 	parser.add_argument(
 	  '--cog_bucket', required=True, help='GCS Output Bucket ONLY (no folders) e.g. "bucket_name" for Converted COGs')
 	parser.add_argument(
-	  '--cog_folder', required=True, help='GCS Output Bucket folder(s) e.g. "folder_level1/folder_level2/" for Converted COGs - can be blank for root of bucket')
+	  '--cog_folder', required=True, help='GCS Output Bucket folder(s) e.g. "folder_level1/folder_level2" for Converted COGs - can be blank for root of bucket')
 	parser.add_argument(
 	  '--source_bucket', required=True, help='GCS Source Bucket ONLY (no folders) e.g. "bucket_name"')
 	parser.add_argument(
-	  '--source_folder', required=True, help='GCS Bucket folder(s) e.g. "folder_level1/folder_level2/"')
+	  '--source_folder', required=True, help='GCS Bucket folder(s) e.g. "folder_level1/folder_level2"')
 	parser.add_argument(
 	  '--file_pattern', required=True, help='File pattern to search e.g. "*.tif"')
 	parser.add_argument(
@@ -197,28 +211,48 @@ if __name__ == '__main__':
 	  '--profile',
 	  default='lzw',
 	  required=False,
-	  help='COG Profile to use (jpeg, webp, lzw, deflate, etc.) JPEG is default but only supports 3 band rasters. WebP not well supported yet.')
+	  help='COG Profile to use (jpeg, webp, lzw, deflate, etc.) JPEG is default but only supports 3 band rasters. WebP not well supported yet')
+	parser.add_argument(
+	  '--max_num_workers',
+	  default=20,
+	  required=False,
+	  help='The maximum number of workers to scale to in the Dataflow pipeline')
+	parser.add_argument(
+	  '--machine_type',
+	  default='n1-standard-2',
+	  required=False,
+	  help='The Compute Engine machine type to use for each worker')
+	parser.add_argument(
+	  '--region',
+	  default='us-central1',
+	  required=False,
+	  help='The GCP region in which the pipeline will run')
 
 	# Parse command-line args and add a few more
 	logging.basicConfig(level=getattr(logging, 'INFO', None))
 	options = parser.parse_args().__dict__
 	cog_bucket = options['cog_bucket']
 	cog_folder = options['cog_folder']
+
+	if not cog_folder:
+		staging_location = os.path.join('gs://',cog_bucket,'tmp', 'staging')
+		temp_location = os.path.join('gs://',cog_bucket, 'tmp')
+	else:
+		staging_location = os.path.join('gs://',cog_bucket + "/" + cog_folder, 'tmp', 'staging')
+		temp_location = os.path.join('gs://',cog_bucket + "/" + cog_folder, 'tmp')
+
+	logging.info("Staging Location {}".format(staging_location))
+	logging.info("Temp Location {}".format(temp_location))			
+
 	options.update({
 	  'staging_location':
-		  os.path.join('gs://',cog_bucket + "/" + cog_folder, 'tmp', 'staging'),
+		  staging_location,
 	  'temp_location':
-		  os.path.join('gs://',cog_bucket + "/" + cog_folder, 'tmp'),
+		  temp_location,
 	  'job_name':
 		  'cogbeam',
 	  'teardown_policy':
 		  'TEARDOWN_ALWAYS',
-	  'max_num_workers':
-		  20,
-	  'machine_type':
-		  'n1-standard-2',
-	  'region':
-		  'us-central1',
 	  'setup_file':
 		  os.path.join(os.path.dirname(os.path.abspath(__file__)), './setup.py'),
 	  'save_main_session':

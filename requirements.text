@@ -1,0 +1,5 @@
+rasterio>=1.1.6
+rio-cogeo>=1.1.10
+google-cloud-storage
+apache-beam
+google_apitools
