@@ -127,7 +127,7 @@ By default, workers use your project's Compute Engine default service account as
 | --machine\_type    | No       | n1-standard-2 | The Compute Engine [machine type](https://cloud.google.com/compute/docs/machine-types) to use for each worker                                                                             |
 | --region          | No       | us-central1   | The [GCP region](https://cloud.google.com/compute/docs/regions-zones#available) in which the pipeline will run                                                                 |
 
-##Example
+## Example
 
 This example shows using cogbeam to convert the 812 regular GeoTIFFs from the 2016 NAIP for the US state of Vermont,located in the publicly accessible gs://vermont-naip-2016 bucket, into 812 COGs located in the publicly accessible gs://vermont-naip-2016-cog bucket. 
 
@@ -145,7 +145,7 @@ When the pipeline completes, all the workers will be turned down and you should 
 
 ![](https://storage.googleapis.com/cogbeam-images/dataflow3.png)
 
-###Result
+### Result
 
 At the end of the script, a sample Google Earth Engine script is generated and uploaded to the cog_bucket. In this example, it is uploaded to: [gs://vermont-naip-2016-cog/gee-script.js](https://storage.googleapis.com/vermont-naip-2016-cog/gee-script.js)
 
@@ -159,7 +159,7 @@ But don't forget, these are 4 band COGs, and Google Earth Engine isn't just for 
 ![](https://storage.googleapis.com/cogbeam-images/vt-naip-2016-cog2.png)
 [View this GEE script.](https://code.earthengine.google.com/8ffe2ce1754b8fbcb2c7b1519e101243?hideCode=true) Note: there is a slight delay when using COGs as GEE has to read all of the headers to understand their metadata. 
 
-##Cost Considerations
+## Cost Considerations
 *These figures are estimates using GCP pricing as of 10/2020
 
 Generating COGs slightly increases the size of each file because it adds tiled overviews to the GeoTIFFs. Below we'll review some of the costs for the 2016 Vermont NAIP example. 
